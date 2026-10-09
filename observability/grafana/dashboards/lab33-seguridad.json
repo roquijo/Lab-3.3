@@ -1,0 +1,49 @@
+{
+  "uid": "lab33-seguridad",
+  "title": "Lab 3.3 — Golden signals de seguridad",
+  "tags": ["lab33", "security"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "text", "title": "Alcance de este tablero",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": { "mode": "markdown", "content": "Los paneles numéricos usan telemetría real del laboratorio local. No hay conteo de CVE: no está conectado Container Analysis ni Amazon Inspector. VPC Flow Logs, Security Command Center y Security Hub quedan en Terraform, apagados por defecto, y no alimentan este tablero hasta un despliegue cloud." }
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Autenticaciones rechazadas",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(auth_failures_total[5m]))", "legendFormat": "contador auth.failures" },
+        { "refId": "B", "expr": "sum(rate(http_server_request_duration_seconds_count{service_name=\"service-a\",http_route=\"/api/session\",http_response_status_code=\"401\"}[5m]))", "legendFormat": "HTTP 401 /api/session" }
+      ]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Tráfico norte-sur (entrada a service-a)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [{ "refId": "A", "expr": "sum by (http_route) (rate(http_server_request_duration_seconds_count{service_name=\"service-a\",http_route=~\"/api/.*\"}[2m]))" }]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Tráfico este-oeste (clientes HTTP internos)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [{ "refId": "A", "expr": "sum by (service_name) (rate(http_client_request_duration_seconds_count{service_name=~\"service-a|service-b\"}[2m]))" }]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Errores de autorización y fallos este-oeste",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_server_request_duration_seconds_count{service_name=\"service-a\",http_response_status_code=~\"401|403\"}[5m]))", "legendFormat": "401/403 service-a" },
+        { "refId": "B", "expr": "sum(rate(http_client_request_duration_seconds_count{service_name=~\"service-a|service-b\",http_response_status_code=~\"5..\"}[5m]))", "legendFormat": "5xx entre servicios" }
+      ]
+    }
+  ]
+}

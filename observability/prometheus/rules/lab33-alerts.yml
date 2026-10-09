@@ -1,0 +1,92 @@
+groups:
+  - name: lab33-recording
+    interval: 30s
+    rules:
+      - record: lab:data_service:error_ratio:2m
+        expr: |
+          (
+            sum(rate(http_server_request_duration_seconds_count{service_name="data-service",http_route=~"/api/records/.*",http_response_status_code=~"5.."}[2m]))
+            or vector(0)
+          )
+          /
+          clamp_min(
+            sum(rate(http_server_request_duration_seconds_count{service_name="data-service",http_route=~"/api/records/.*"}[2m])),
+            1e-9
+          )
+      - record: lab:data_service:error_ratio:baseline10m
+        expr: avg_over_time(lab:data_service:error_ratio:2m[10m])
+      - record: lab:data_service:error_ratio:stddev10m
+        expr: stddev_over_time(lab:data_service:error_ratio:2m[10m])
+      - record: lab:service_a:latency_p99:2m
+        expr: histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name="service-a",http_route=~"/api/orders/.*"}[2m])))
+      - record: lab:data_service:latency_p99:2m
+        expr: histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name="data-service",http_route=~"/api/records/.*"}[2m])))
+      - record: lab:service_a:success_ratio:5m
+        expr: |
+          sum(rate(http_server_request_duration_seconds_count{service_name="service-a",http_route=~"/api/orders/.*",http_response_status_code=~"2.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_request_duration_seconds_count{service_name="service-a",http_route=~"/api/orders/.*"}[5m])), 1e-9)
+
+  - name: lab33-alerts
+    rules:
+      - alert: ServiceALatencySlo
+        expr: lab:service_a:latency_p99:2m > 0.150
+        for: 30s
+        labels:
+          severity: warning
+          service: service-a
+          environment: local
+          anomaly_type: latency_slo
+        annotations:
+          summary: "p99 de service-a superó el SLO de 150 ms"
+          observed: "{{ $value }}"
+          slo_seconds: "0.150"
+          trace_hint: "Prometheus no trae trace_id. Ejecuta observability/aiops/enrich_incident.py"
+          loki_query: '{service_name=~"service-a|service-b|data-service"} |= "latencia inyectada"'
+
+      - alert: DataServiceErrorStatic
+        expr: lab:data_service:error_ratio:2m > 0.05
+        for: 30s
+        labels:
+          severity: warning
+          service: data-service
+          environment: local
+          anomaly_type: static_error_rate
+        annotations:
+          summary: "La tasa de error de data-service superó el umbral fijo del 5 %"
+          observed: "{{ $value }}"
+          threshold: "0.05"
+
+      - alert: DataServiceCorrelatedAnomaly
+        expr: |
+          (lab:data_service:error_ratio:2m > (lab:data_service:error_ratio:baseline10m + 2 * lab:data_service:error_ratio:stddev10m))
+          and (lab:service_a:latency_p99:2m > 0.150)
+          and (count_over_time(lab:data_service:error_ratio:2m[10m]) >= 8)
+          and (lab:data_service:error_ratio:stddev10m == lab:data_service:error_ratio:stddev10m)
+        for: 30s
+        labels:
+          severity: critical
+          service: data-service
+          environment: local
+          platform: local
+          anomaly_type: correlated_error_and_latency
+        annotations:
+          summary: "Anomalía correlacionada en data-service: error rate sobre baseline+2σ y p99 sobre el SLO"
+          error_rate: "{{ $value }}"
+          slo_seconds: "0.150"
+          recommendation: "Revisar si CHAOS está activo, luego la traza del error inyectado y el SELECT de orders."
+          trace_hint: "Sin trace_id en la serie. observability/aiops/enrich_incident.py consulta Loki."
+          loki_query: '{service_name="data-service"} |= "error inyectado"'
+          tempo_query: '{ resource.service.name = "data-service" && status = error }'
+
+      - alert: AuthFailuresRepeated
+        expr: increase(auth_failures_total[5m]) > 3
+        for: 0s
+        labels:
+          severity: warning
+          service: service-a
+          environment: local
+          anomaly_type: auth_failures
+        annotations:
+          summary: "Más de 3 autenticaciones rechazadas en 5 minutos"
+          recommendation: "Revisar el log 'autenticacion rechazada'. El token no se escribe en el log."

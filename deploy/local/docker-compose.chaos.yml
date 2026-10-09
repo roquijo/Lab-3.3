@@ -1,0 +1,9 @@
+# Se combina con docker-compose.yaml solo durante el laboratorio de caos.
+# No sustituye el archivo base: sin este override los experimentos siguen desarmados.
+services:
+  service-b:
+    environment:
+      CHAOS_ARMED: "true"
+  data-service:
+    environment:
+      CHAOS_ARMED: "true"

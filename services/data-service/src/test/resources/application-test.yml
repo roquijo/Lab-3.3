@@ -1,0 +1,10 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:records;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+lab:
+  api-token: test-token
+  chaos:
+    armed: true

@@ -1,0 +1,176 @@
+name: lab33
+
+networks:
+  lab33:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  tempo-data:
+
+x-java-env: &java-env
+  OTEL_ENABLED: ${OTEL_ENABLED:-true}
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_METRICS_EXPORTER: otlp
+  OTEL_LOGS_EXPORTER: otlp
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "1.0"
+  OTEL_METRIC_EXPORT_INTERVAL: "15000"
+  OTEL_PROPAGATORS: tracecontext,baggage
+  OTEL_JAVAAGENT_EXCLUDE_URLS: ".*/actuator/.*,.*/api/chaos.*"
+  OTEL_RESOURCE_ATTRIBUTES: service.namespace=lab33,service.version=1.0.0,deployment.environment=local,cloud.provider=local
+  DEPLOYMENT_ENVIRONMENT: local
+  LAB_API_TOKEN: ${LAB_API_TOKEN:-lab33-local-token}
+  CHAOS_ARMED: ${CHAOS_ARMED:-false}
+  SPRING_PROFILES_ACTIVE: local
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: lab33-mysql
+    environment:
+      MYSQL_DATABASE: lab33
+      MYSQL_USER: lab
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-lab33-local}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-lab33-root}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    ports:
+      - "13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks: [lab33]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ulab", "-p${MYSQL_PASSWORD:-lab33-local}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  tempo:
+    image: grafana/tempo:2.8.1
+    container_name: lab33-tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ../../observability/tracing/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports: ["13200:3200"]
+    networks: [lab33]
+
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: lab33-loki
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ../../observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports: ["13100:3100"]
+    networks: [lab33]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    container_name: lab33-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ../../observability/collector/collector-local.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "14317:4317"
+      - "14318:4318"
+      - "18888:8888"
+      - "18889:8889"
+      - "23133:13133"
+    networks: [lab33]
+    depends_on: [tempo, loki]
+
+  prometheus:
+    image: prom/prometheus:v3.4.1
+    container_name: lab33-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-remote-write-receiver"
+      - "--enable-feature=exemplar-storage"
+    volumes:
+      - ../../observability/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - ../../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports: ["19090:9090"]
+    networks: [lab33]
+    depends_on: [otel-collector]
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: lab33-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ../../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["13000:3000"]
+    networks: [lab33]
+    depends_on: [prometheus, tempo, loki]
+
+  data-service:
+    build:
+      context: ../..
+      dockerfile: services/Dockerfile
+      args:
+        MODULE: data-service
+    image: lab33-data-service:1.0.0
+    container_name: lab33-data-service
+    environment:
+      <<: *java-env
+      OTEL_SERVICE_NAME: data-service
+      SERVER_PORT: "8082"
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lab33?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: lab
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-lab33-local}
+    ports: ["18082:8082"]
+    networks: [lab33]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  service-b:
+    build:
+      context: ../..
+      dockerfile: services/Dockerfile
+      args:
+        MODULE: service-b
+    image: lab33-service-b:1.0.0
+    container_name: lab33-service-b
+    environment:
+      <<: *java-env
+      OTEL_SERVICE_NAME: service-b
+      SERVER_PORT: "8081"
+      DATA_SERVICE_URL: http://data-service:8082
+    ports: ["18081:8081"]
+    networks: [lab33]
+    depends_on: [data-service, otel-collector]
+
+  service-a:
+    build:
+      context: ../..
+      dockerfile: services/Dockerfile
+      args:
+        MODULE: service-a
+    image: lab33-service-a:1.0.0
+    container_name: lab33-service-a
+    environment:
+      <<: *java-env
+      OTEL_SERVICE_NAME: service-a
+      SERVER_PORT: "8080"
+      SERVICE_B_URL: http://service-b:8081
+    ports: ["18080:8080"]
+    networks: [lab33]
+    depends_on: [service-b, otel-collector]
