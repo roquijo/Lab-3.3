@@ -31,6 +31,5 @@ mvn test
 
 | Archivo | Contenido |
 |---|---|
-| `docs/reporte-ejecutivo.pdf` | Informe ejecutivo, con el estado real de lo ejecutado y lo pendiente |
+| `docs/Seguir un pedido de punta a punta - Laboratorio 3.3.pdf` | Informe ejecutivo |
 | `docs/arquitectura.md` | Flujo, perfiles de base y regla de anomalía |
-| `docs/madurez.md` | Ocho dominios y roadmap de 90 días |
