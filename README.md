@@ -2,8 +2,6 @@
 
 Tres servicios Spring Boot. service-a coordina un pedido, service-b puede inyectar 200 ms y data-service lee MySQL. OpenTelemetry, el Collector, Prometheus, Grafana, Tempo y Loki forman el camino local. GCP y AWS están en Terraform y no se desplegaron.
 
-Los experimentos nacen apagados. La guía para ejecutarlos y grabar el video es [PASOS.md](PASOS.md). El informe ejecutivo formateado está en [docs/reporte-ejecutivo.pdf](docs/reporte-ejecutivo.pdf).
-
 ## Puertos en el host
 
 Están elegidos para no ocupar los puertos locales habituales 8080, 3000 y 9090.
@@ -36,4 +34,3 @@ mvn test
 | `docs/reporte-ejecutivo.pdf` | Informe ejecutivo, con el estado real de lo ejecutado y lo pendiente |
 | `docs/arquitectura.md` | Flujo, perfiles de base y regla de anomalía |
 | `docs/madurez.md` | Ocho dominios y roadmap de 90 días |
-| `PASOS.md` | Procedimiento de demostración y guion |
